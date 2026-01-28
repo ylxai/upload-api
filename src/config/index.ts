@@ -10,11 +10,6 @@ export const config = {
   port: parseInt(process.env.UPLOAD_API_PORT || '4000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // Storage paths (VPS local)
-  storagePath: process.env.STORAGE_PATH || '/home/eouser/storage',
-  storageUrl:
-    process.env.STORAGE_URL || 'https://storage.hafiportrait.photography',
-
   // R2 Configuration (for thumbnails)
   r2: {
     endpoint: process.env.R2_ENDPOINT || '',

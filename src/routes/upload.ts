@@ -50,7 +50,8 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
           file.buffer,
           'portfolio',
           null,
-          filename
+          filename,
+          file.mimetype
         )
 
         // Process and generate thumbnails (upload to R2)
@@ -130,7 +131,8 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
               file.buffer,
               'portfolio',
               null,
-              filename
+              filename,
+              file.mimetype
             )
 
             // Process and generate thumbnails
@@ -228,7 +230,8 @@ router.post('/event/:eventId', (req: Request, res: Response) => {
           file.buffer,
           'events',
           eventId as string,
-          filename
+          filename,
+          file.mimetype
         )
 
         // Process and generate thumbnails
@@ -314,7 +317,8 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
               file.buffer,
               'events',
               eventId as string,
-              filename
+              filename,
+              file.mimetype
             )
 
             // Process and generate thumbnails
@@ -407,7 +411,8 @@ router.post('/slideshow', (req: Request, res: Response) => {
           file.buffer,
           'slideshow',
           null,
-          filename
+          filename,
+          file.mimetype
         )
 
         // Process and generate thumbnails

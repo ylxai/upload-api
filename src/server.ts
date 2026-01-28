@@ -77,7 +77,7 @@ const server = app.listen(config.port, () => {
   console.log('═══════════════════════════════════════════════════════')
   console.log(`   Port:        ${config.port}`)
   console.log(`   Environment: ${config.nodeEnv}`)
-  console.log(`   Storage:     ${config.storagePath}`)
+  console.log(`   Storage:     R2 only`)
   console.log(`   R2 Bucket:   ${config.r2.bucket}`)
   console.log('═══════════════════════════════════════════════════════')
 })
