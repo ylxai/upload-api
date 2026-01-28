@@ -47,3 +47,4 @@ temp/
 
 # Debug
 .debug/
+yarn.lock
