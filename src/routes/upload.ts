@@ -23,7 +23,7 @@ router.use(authenticate)
  * Upload single photo to portfolio
  */
 router.post('/portfolio', (req: Request, res: Response, _next) => {
-  uploadSingle(req, res, async (err) => {
+  uploadSingle(req, res, async (err: Error | null) => {
     if (err) {
       const { status, message } = handleMulterError(err)
       return res.status(status).json({ error: message })
@@ -92,7 +92,7 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
  * Upload multiple photos to portfolio
  */
 router.post('/portfolio/batch', (req: Request, res: Response) => {
-  uploadMultiple(req, res, async (err) => {
+  uploadMultiple(req, res, async (err: Error | null) => {
     if (err) {
       const { status, message } = handleMulterError(err)
       return res.status(status).json({ error: message })
@@ -191,7 +191,7 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
  * Upload photo to specific event
  */
 router.post('/event/:eventId', (req: Request, res: Response) => {
-  uploadSingle(req, res, async (err) => {
+  uploadSingle(req, res, async (err: Error | null) => {
     if (err) {
       const { status, message } = handleMulterError(err)
       return res.status(status).json({ error: message })
@@ -266,7 +266,7 @@ router.post('/event/:eventId', (req: Request, res: Response) => {
  * Upload multiple photos to event
  */
 router.post('/event/:eventId/batch', (req: Request, res: Response) => {
-  uploadMultiple(req, res, async (err) => {
+  uploadMultiple(req, res, async (err: Error | null) => {
     if (err) {
       const { status, message } = handleMulterError(err)
       return res.status(status).json({ error: message })
@@ -372,7 +372,7 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
  * Upload photo for hero slideshow
  */
 router.post('/slideshow', (req: Request, res: Response) => {
-  uploadSingle(req, res, async (err) => {
+  uploadSingle(req, res, async (err: Error | null) => {
     if (err) {
       const { status, message } = handleMulterError(err)
       return res.status(status).json({ error: message })
