@@ -1,0 +1,113 @@
+# Nginx configuration for Hafiportrait Upload API
+# 
+# This config should be placed in: /etc/nginx/sites-available/upload-api
+# Then symlink: sudo ln -s /etc/nginx/sites-available/upload-api /etc/nginx/sites-enabled/
+#
+# Assumes Cloudflare proxy is enabled (orange cloud)
+
+# Upstream for Upload API
+upstream upload_api {
+    server 127.0.0.1:4000;
+    keepalive 32;
+}
+
+# API Server (api.hafiportrait.photography)
+server {
+    listen 80;
+    server_name api.hafiportrait.photography;
+
+    # Cloudflare real IP
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    real_ip_header CF-Connecting-IP;
+
+    # Max upload size (200MB)
+    client_max_body_size 200M;
+    
+    # Timeouts for large uploads
+    client_body_timeout 300s;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+
+    # Upload API proxy
+    location / {
+        proxy_pass http://upload_api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Buffer settings for large uploads
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+}
+
+# Storage Server (storage.hafiportrait.photography)
+server {
+    listen 80;
+    server_name storage.hafiportrait.photography;
+
+    # Cloudflare real IP (same as above)
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    real_ip_header CF-Connecting-IP;
+
+    # Root directory for static files
+    root /home/eouser/storage;
+
+    # Cache control for images
+    location ~* \.(jpg|jpeg|png|gif|webp|heic|heif)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff";
+        
+        # CORS headers (if needed)
+        add_header Access-Control-Allow-Origin "*";
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
+    }
+
+    # Default location
+    location / {
+        try_files $uri $uri/ =404;
+        
+        # Directory listing disabled
+        autoindex off;
+    }
+
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+    }
+}
