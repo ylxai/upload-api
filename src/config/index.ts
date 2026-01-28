@@ -7,7 +7,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env.production') })
 
 export const config = {
   // Server
-  port: parseInt(process.env.UPLOAD_API_PORT || '4000', 10),
+  port: parseInt(process.env.PORT || process.env.UPLOAD_API_PORT || '4000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
   // R2 Configuration (for thumbnails)
