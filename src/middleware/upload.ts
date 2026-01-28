@@ -42,7 +42,7 @@ export const uploadMultiple = upload.array('files', config.upload.maxFiles)
 /**
  * Error handler for multer errors
  */
-export function handleMulterError(error: Error): {
+export function handleMulterError(error: unknown): {
   status: number
   message: string
 } {
@@ -71,8 +71,15 @@ export function handleMulterError(error: Error): {
     }
   }
 
+  if (error instanceof Error) {
+    return {
+      status: 400,
+      message: error.message || 'Upload failed',
+    }
+  }
+
   return {
     status: 400,
-    message: error.message || 'Upload failed',
+    message: 'Upload failed',
   }
 }
