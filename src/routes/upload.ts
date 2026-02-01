@@ -11,6 +11,7 @@ import {
   getThumbnailUrls,
 } from '../services/image-processor.js'
 import { saveOriginal, generateUniqueFilename } from '../services/storage.js'
+import { insertEventPhoto, insertHeroSlide, insertPortfolioPhoto } from '../services/db.js'
 import { v4 as uuidv4 } from 'uuid'
 
 const router = Router()
@@ -63,12 +64,27 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
         )
 
         const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+        const photoId = uuidv4()
+
+        await insertPortfolioPhoto({
+          id: photoId,
+          filename: file.originalname,
+          originalUrl: originalUrl,
+          thumbnailUrl: thumbnailUrls.medium || originalUrl,
+          thumbnailSmallUrl: thumbnailUrls.small,
+          thumbnailMediumUrl: thumbnailUrls.medium,
+          thumbnailLargeUrl: thumbnailUrls.large,
+          width: processResult.original.width,
+          height: processResult.original.height,
+          size: file.size,
+          mimeType: file.mimetype,
+        })
 
         // Return result
         res.json({
           success: true,
           photo: {
-            id: uuidv4(),
+            id: photoId,
             filename: file.originalname,
             original_url: originalUrl,
             thumbnail_url: thumbnailUrls.medium,
@@ -144,12 +160,27 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
             )
 
             const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+            const photoId = uuidv4()
+
+            await insertPortfolioPhoto({
+              id: photoId,
+              filename: file.originalname,
+              originalUrl: originalUrl,
+              thumbnailUrl: thumbnailUrls.medium || originalUrl,
+              thumbnailSmallUrl: thumbnailUrls.small,
+              thumbnailMediumUrl: thumbnailUrls.medium,
+              thumbnailLargeUrl: thumbnailUrls.large,
+              width: processResult.original.width,
+              height: processResult.original.height,
+              size: file.size,
+              mimeType: file.mimetype,
+            })
 
             results.push({
               filename: file.originalname,
               success: true,
               photo: {
-                id: uuidv4(),
+                id: photoId,
                 original_url: originalUrl,
                 thumbnail_url: thumbnailUrls.medium,
                 thumbnail_small_url: thumbnailUrls.small,
@@ -243,11 +274,27 @@ router.post('/event/:eventId', (req: Request, res: Response) => {
         )
 
         const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+        const photoId = uuidv4()
+
+        await insertEventPhoto({
+          id: photoId,
+          eventId: eventId as string,
+          filename: file.originalname,
+          originalUrl: originalUrl,
+          thumbnailUrl: thumbnailUrls.medium,
+          thumbnailSmallUrl: thumbnailUrls.small,
+          thumbnailMediumUrl: thumbnailUrls.medium,
+          thumbnailLargeUrl: thumbnailUrls.large,
+          width: processResult.original.width,
+          height: processResult.original.height,
+          size: file.size,
+          mimeType: file.mimetype,
+        })
 
         res.json({
           success: true,
           photo: {
-            id: uuidv4(),
+            id: photoId,
             event_id: eventId,
             filename: file.originalname,
             original_url: originalUrl,
@@ -330,12 +377,28 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
             )
 
             const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+            const photoId = uuidv4()
+
+            await insertEventPhoto({
+              id: photoId,
+              eventId: eventId as string,
+              filename: file.originalname,
+              originalUrl: originalUrl,
+              thumbnailUrl: thumbnailUrls.medium,
+              thumbnailSmallUrl: thumbnailUrls.small,
+              thumbnailMediumUrl: thumbnailUrls.medium,
+              thumbnailLargeUrl: thumbnailUrls.large,
+              width: processResult.original.width,
+              height: processResult.original.height,
+              size: file.size,
+              mimeType: file.mimetype,
+            })
 
             results.push({
               filename: file.originalname,
               success: true,
               photo: {
-                id: uuidv4(),
+                id: photoId,
                 event_id: eventId,
                 original_url: originalUrl,
                 thumbnail_url: thumbnailUrls.medium,
@@ -424,11 +487,18 @@ router.post('/slideshow', (req: Request, res: Response) => {
         )
 
         const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+        const slideId = uuidv4()
+
+        await insertHeroSlide({
+          id: slideId,
+          imageUrl: originalUrl,
+          thumbnailUrl: thumbnailUrls.large,
+        })
 
         res.json({
           success: true,
           photo: {
-            id: uuidv4(),
+            id: slideId,
             filename: file.originalname,
             original_url: originalUrl,
             thumbnail_url: thumbnailUrls.large, // Slideshow uses large
