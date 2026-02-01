@@ -1,5 +1,10 @@
 import { Pool } from 'pg'
 import { config } from '../config/index.js'
+import type {
+  PortfolioPhotoInput,
+  EventPhotoInput,
+  HeroSlideInput,
+} from '../types/index.js'
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -8,20 +13,12 @@ const pool = new Pool({
   },
 })
 
-export async function query<T>(text: string, params: any[] = []): Promise<T[]> {
+export async function query<T>(text: string, params: unknown[] = []): Promise<T[]> {
   const result = await pool.query(text, params)
   return result.rows as T[]
 }
 
-export async function insertPortfolioPhoto(input: {
-  id: string
-  filename: string
-  originalUrl: string
-  thumbnailUrl: string
-  thumbnailSmallUrl: string | null
-  thumbnailMediumUrl: string | null
-  thumbnailLargeUrl: string | null
-}): Promise<void> {
+export async function insertPortfolioPhoto(input: PortfolioPhotoInput): Promise<void> {
   await query(
     `INSERT INTO portfolio_photos (
       id, filename, original_url, thumbnail_url,
@@ -42,20 +39,7 @@ export async function insertPortfolioPhoto(input: {
   )
 }
 
-export async function insertEventPhoto(input: {
-  id: string
-  eventId: string
-  filename: string
-  originalUrl: string
-  thumbnailUrl: string | null
-  thumbnailSmallUrl: string | null
-  thumbnailMediumUrl: string | null
-  thumbnailLargeUrl: string | null
-  width: number
-  height: number
-  size: number
-  mimeType: string
-}): Promise<void> {
+export async function insertEventPhoto(input: EventPhotoInput): Promise<void> {
   await query(
     `INSERT INTO photos (
       id, event_id, filename, original_url,
@@ -81,11 +65,7 @@ export async function insertEventPhoto(input: {
   )
 }
 
-export async function insertHeroSlide(input: {
-  id: string
-  imageUrl: string
-  thumbnailUrl: string | null
-}): Promise<void> {
+export async function insertHeroSlide(input: HeroSlideInput): Promise<void> {
   await query(
     `INSERT INTO hero_slideshow (
       id, image_url, thumbnail_url, created_at, updated_at

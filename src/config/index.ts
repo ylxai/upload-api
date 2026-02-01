@@ -29,6 +29,7 @@ export const config = {
   upload: {
     maxFileSize: 200 * 1024 * 1024, // 200MB
     maxFiles: 50,
+    concurrentLimit: parseInt(process.env.UPLOAD_CONCURRENT_LIMIT || '2', 10),
     allowedMimeTypes: [
       'image/jpeg',
       'image/png',
