@@ -11,7 +11,11 @@ import {
   getThumbnailUrls,
 } from '../services/image-processor.js'
 import { saveOriginal, generateUniqueFilename } from '../services/storage.js'
-import { insertEventPhoto, insertHeroSlide, insertPortfolioPhoto } from '../services/db.js'
+import {
+  insertEventPhoto,
+  insertHeroSlide,
+  insertPortfolioPhoto,
+} from '../services/db.js'
 import { v4 as uuidv4 } from 'uuid'
 
 const router = Router()
