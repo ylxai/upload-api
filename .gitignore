@@ -48,4 +48,3 @@ temp/
 # Debug
 .debug/
 yarn.lock
-.zeabur/

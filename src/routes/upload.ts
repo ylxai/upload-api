@@ -74,10 +74,6 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
           thumbnailSmallUrl: thumbnailUrls.small,
           thumbnailMediumUrl: thumbnailUrls.medium,
           thumbnailLargeUrl: thumbnailUrls.large,
-          width: processResult.original.width,
-          height: processResult.original.height,
-          size: file.size,
-          mimeType: file.mimetype,
         })
 
         // Return result
@@ -170,10 +166,6 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
               thumbnailSmallUrl: thumbnailUrls.small,
               thumbnailMediumUrl: thumbnailUrls.medium,
               thumbnailLargeUrl: thumbnailUrls.large,
-              width: processResult.original.width,
-              height: processResult.original.height,
-              size: file.size,
-              mimeType: file.mimetype,
             })
 
             results.push({
