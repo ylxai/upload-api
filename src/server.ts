@@ -13,14 +13,21 @@ const app = express()
 // Security middleware
 app.use(helmet())
 
-// CORS - allow requests from Vercel frontend
+// CORS - allow requests from Vercel frontend and Railway internal
 app.use(
   cors({
     origin: [
+      // Production domains
       'https://hafiportrait.photography',
       'https://www.hafiportrait.photography',
+      // Vercel preview deployments
       /\.vercel\.app$/,
+      // Railway internal services
+      /\.railway\.app$/,
+      /\.up\.railway\.app$/,
+      // Local development
       'http://localhost:3000',
+      'http://localhost:4000',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],

@@ -1,5 +1,6 @@
-import { Router, Request, Response } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { authenticate } from '../middleware/auth.js'
+import { config } from '../config/index.js'
 import {
   uploadSingle,
   uploadMultiple,
@@ -16,59 +17,138 @@ import {
   insertHeroSlide,
   insertPortfolioPhoto,
 } from '../services/db.js'
+import { readFileBuffer, deleteFile } from '../services/file-io.js'
 import { v4 as uuidv4 } from 'uuid'
+import { runWithConcurrency } from '../utils/index.js'
+import type {
+  PhotoMetadata,
+  EventPhotoMetadata,
+  BatchUploadResult,
+  UploadType,
+} from '../types/index.js'
 
 const router = Router()
 
 // All routes require authentication
 router.use(authenticate)
 
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Multer error handling middleware wrapper
+ */
+function handleUploadError(err: unknown, res: Response): boolean {
+  if (err) {
+    const { status, message } = handleMulterError(err)
+    res.status(status).json({ error: message })
+    return true
+  }
+  return false
+}
+
+/**
+ * Process single file upload for portfolio/slideshow
+ */
+async function processSingleUpload(
+  file: Express.Multer.File,
+  type: UploadType,
+  eventId: string | null = null
+): Promise<{
+  photoId: string
+  filename: string
+  originalUrl: string
+  thumbnailUrls: ReturnType<typeof getThumbnailUrls>
+  processResult: Awaited<ReturnType<typeof processImage>>
+}> {
+  const fileBuffer = await readFileBuffer(file.path)
+
+  // Validate image
+  const validation = await validateImage(fileBuffer, file.mimetype)
+  if (!validation.valid) {
+    throw new Error(validation.error || 'Invalid image')
+  }
+
+  // Generate unique filename
+  const filename = generateUniqueFilename(file.originalname)
+
+  // Save original to R2
+  const { url: originalUrl } = await saveOriginal(
+    fileBuffer,
+    type,
+    eventId,
+    filename,
+    file.mimetype
+  )
+
+  // Process and generate thumbnails
+  const processResult = await processImage(fileBuffer, filename, type, eventId)
+  const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
+
+  return {
+    photoId: uuidv4(),
+    filename,
+    originalUrl,
+    thumbnailUrls,
+    processResult,
+  }
+}
+
+/**
+ * Build photo metadata response object
+ */
+function buildPhotoMetadata(
+  photoId: string,
+  file: Express.Multer.File,
+  originalUrl: string,
+  thumbnailUrls: ReturnType<typeof getThumbnailUrls>,
+  processResult: Awaited<ReturnType<typeof processImage>>
+): PhotoMetadata {
+  return {
+    id: photoId,
+    filename: file.originalname,
+    original_url: originalUrl,
+    thumbnail_url: thumbnailUrls.medium,
+    thumbnail_small_url: thumbnailUrls.small,
+    thumbnail_medium_url: thumbnailUrls.medium,
+    thumbnail_large_url: thumbnailUrls.large,
+    width: processResult.original.width,
+    height: processResult.original.height,
+    size: file.size,
+    mime_type: file.mimetype,
+  }
+}
+
+/**
+ * Get concurrency limit from config
+ */
+function getConcurrencyLimit(): number {
+  return Math.max(1, Math.min(5, config.upload.concurrentLimit || 2))
+}
+
+// =============================================================================
+// Routes
+// =============================================================================
+
 /**
  * POST /upload/portfolio
  * Upload single photo to portfolio
  */
-router.post('/portfolio', (req: Request, res: Response, _next) => {
+router.post('/portfolio', (req: Request, res: Response, next: NextFunction) => {
   uploadSingle(req, res, (err: unknown) => {
-    void (async () => {
-      if (err) {
-        const { status, message } = handleMulterError(err)
-        return res.status(status).json({ error: message })
+    if (handleUploadError(err, res)) return
+
+    const file = req.file
+
+    ;(async () => {
+      if (!file) {
+        return res.status(400).json({ error: 'No file provided' })
       }
 
       try {
-        const file = req.file
-        if (!file) {
-          return res.status(400).json({ error: 'No file provided' })
-        }
-
-        // Validate image
-        const validation = await validateImage(file.buffer, file.mimetype)
-        if (!validation.valid) {
-          return res.status(400).json({ error: validation.error })
-        }
-
-        // Generate unique filename
-        const filename = generateUniqueFilename(file.originalname)
-
-        // Save original to VPS
-        const { url: originalUrl } = await saveOriginal(
-          file.buffer,
-          'portfolio',
-          null,
-          filename,
-          file.mimetype
-        )
-
-        // Process and generate thumbnails (upload to R2)
-        const processResult = await processImage(
-          file.buffer,
-          filename,
-          'portfolio',
-          null
-        )
-
-        const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
-        const photoId = uuidv4()
+        const { photoId, originalUrl, thumbnailUrls, processResult } =
+          await processSingleUpload(file, 'portfolio')
 
         await insertPortfolioPhoto({
           id: photoId,
@@ -80,27 +160,21 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
           thumbnailLargeUrl: thumbnailUrls.large,
         })
 
-        // Return result
         res.json({
           success: true,
-          photo: {
-            id: photoId,
-            filename: file.originalname,
-            original_url: originalUrl,
-            thumbnail_url: thumbnailUrls.medium,
-            thumbnail_small_url: thumbnailUrls.small,
-            thumbnail_medium_url: thumbnailUrls.medium,
-            thumbnail_large_url: thumbnailUrls.large,
-            width: processResult.original.width,
-            height: processResult.original.height,
-            size: file.size,
-          },
+          photo: buildPhotoMetadata(
+            photoId,
+            file,
+            originalUrl,
+            thumbnailUrls,
+            processResult
+          ),
         })
       } catch (error) {
         console.error('Portfolio upload error:', error)
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Upload failed',
-        })
+        next(error)
+      } finally {
+        await deleteFile(file.path)
       }
     })()
   })
@@ -110,57 +184,24 @@ router.post('/portfolio', (req: Request, res: Response, _next) => {
  * POST /upload/portfolio/batch
  * Upload multiple photos to portfolio
  */
-router.post('/portfolio/batch', (req: Request, res: Response) => {
+router.post('/portfolio/batch', (req: Request, res: Response, next: NextFunction) => {
   uploadMultiple(req, res, (err: unknown) => {
-    void (async () => {
-      if (err) {
-        const { status, message } = handleMulterError(err)
-        return res.status(status).json({ error: message })
+    if (handleUploadError(err, res)) return
+
+    const files = req.files as Express.Multer.File[]
+
+    ;(async () => {
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: 'No files provided' })
       }
 
       try {
-        const files = req.files as Express.Multer.File[]
-        if (!files || files.length === 0) {
-          return res.status(400).json({ error: 'No files provided' })
-        }
+        const results: BatchUploadResult<PhotoMetadata>[] = []
 
-        const results = []
-
-        for (const file of files) {
+        await runWithConcurrency(files, getConcurrencyLimit(), async (file) => {
           try {
-            // Validate image
-            const validation = await validateImage(file.buffer, file.mimetype)
-            if (!validation.valid) {
-              results.push({
-                filename: file.originalname,
-                success: false,
-                error: validation.error,
-              })
-              continue
-            }
-
-            // Generate unique filename
-            const filename = generateUniqueFilename(file.originalname)
-
-            // Save original to VPS
-            const { url: originalUrl } = await saveOriginal(
-              file.buffer,
-              'portfolio',
-              null,
-              filename,
-              file.mimetype
-            )
-
-            // Process and generate thumbnails
-            const processResult = await processImage(
-              file.buffer,
-              filename,
-              'portfolio',
-              null
-            )
-
-            const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
-            const photoId = uuidv4()
+            const { photoId, originalUrl, thumbnailUrls, processResult } =
+              await processSingleUpload(file, 'portfolio')
 
             await insertPortfolioPhoto({
               id: photoId,
@@ -175,17 +216,13 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
             results.push({
               filename: file.originalname,
               success: true,
-              photo: {
-                id: photoId,
-                original_url: originalUrl,
-                thumbnail_url: thumbnailUrls.medium,
-                thumbnail_small_url: thumbnailUrls.small,
-                thumbnail_medium_url: thumbnailUrls.medium,
-                thumbnail_large_url: thumbnailUrls.large,
-                width: processResult.original.width,
-                height: processResult.original.height,
-                size: file.size,
-              },
+              photo: buildPhotoMetadata(
+                photoId,
+                file,
+                originalUrl,
+                thumbnailUrls,
+                processResult
+              ),
             })
           } catch (error) {
             results.push({
@@ -193,8 +230,10 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
               success: false,
               error: error instanceof Error ? error.message : 'Failed',
             })
+          } finally {
+            await deleteFile(file.path)
           }
-        }
+        })
 
         const successCount = results.filter((r) => r.success).length
         const failCount = results.filter((r) => !r.success).length
@@ -211,9 +250,7 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
         })
       } catch (error) {
         console.error('Batch upload error:', error)
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Upload failed',
-        })
+        next(error)
       }
     })()
   })
@@ -223,58 +260,30 @@ router.post('/portfolio/batch', (req: Request, res: Response) => {
  * POST /upload/event/:eventId
  * Upload photo to specific event
  */
-router.post('/event/:eventId', (req: Request, res: Response) => {
+router.post('/event/:eventId', (req: Request, res: Response, next: NextFunction) => {
   uploadSingle(req, res, (err: unknown) => {
-    void (async () => {
-      if (err) {
-        const { status, message } = handleMulterError(err)
-        return res.status(status).json({ error: message })
+    if (handleUploadError(err, res)) return
+
+    const file = req.file
+    const eventIdParam = req.params.eventId
+    const eventId = Array.isArray(eventIdParam) ? eventIdParam[0] : eventIdParam
+
+    ;(async () => {
+      if (!file) {
+        return res.status(400).json({ error: 'No file provided' })
+      }
+
+      if (!eventId) {
+        return res.status(400).json({ error: 'Event ID required' })
       }
 
       try {
-        const { eventId } = req.params
-        const file = req.file
-
-        if (!file) {
-          return res.status(400).json({ error: 'No file provided' })
-        }
-
-        if (!eventId) {
-          return res.status(400).json({ error: 'Event ID required' })
-        }
-
-        // Validate image
-        const validation = await validateImage(file.buffer, file.mimetype)
-        if (!validation.valid) {
-          return res.status(400).json({ error: validation.error })
-        }
-
-        // Generate unique filename
-        const filename = generateUniqueFilename(file.originalname)
-
-        // Save original to VPS
-        const { url: originalUrl } = await saveOriginal(
-          file.buffer,
-          'events',
-          eventId as string,
-          filename,
-          file.mimetype
-        )
-
-        // Process and generate thumbnails
-        const processResult = await processImage(
-          file.buffer,
-          filename,
-          'events',
-          eventId as string
-        )
-
-        const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
-        const photoId = uuidv4()
+        const { photoId, originalUrl, thumbnailUrls, processResult } =
+          await processSingleUpload(file, 'events', eventId)
 
         await insertEventPhoto({
           id: photoId,
-          eventId: eventId as string,
+          eventId: eventId,
           filename: file.originalname,
           originalUrl: originalUrl,
           thumbnailUrl: thumbnailUrls.medium,
@@ -287,27 +296,23 @@ router.post('/event/:eventId', (req: Request, res: Response) => {
           mimeType: file.mimetype,
         })
 
-        res.json({
-          success: true,
-          photo: {
-            id: photoId,
-            event_id: eventId,
-            filename: file.originalname,
-            original_url: originalUrl,
-            thumbnail_url: thumbnailUrls.medium,
-            thumbnail_small_url: thumbnailUrls.small,
-            thumbnail_medium_url: thumbnailUrls.medium,
-            thumbnail_large_url: thumbnailUrls.large,
-            width: processResult.original.width,
-            height: processResult.original.height,
-            size: file.size,
-          },
-        })
+        const photo: EventPhotoMetadata = {
+          ...buildPhotoMetadata(
+            photoId,
+            file,
+            originalUrl,
+            thumbnailUrls,
+            processResult
+          ),
+          event_id: eventId,
+        }
+
+        res.json({ success: true, photo })
       } catch (error) {
         console.error('Event upload error:', error)
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Upload failed',
-        })
+        next(error)
+      } finally {
+        await deleteFile(file.path)
       }
     })()
   })
@@ -317,67 +322,34 @@ router.post('/event/:eventId', (req: Request, res: Response) => {
  * POST /upload/event/:eventId/batch
  * Upload multiple photos to event
  */
-router.post('/event/:eventId/batch', (req: Request, res: Response) => {
+router.post('/event/:eventId/batch', (req: Request, res: Response, next: NextFunction) => {
   uploadMultiple(req, res, (err: unknown) => {
-    void (async () => {
-      if (err) {
-        const { status, message } = handleMulterError(err)
-        return res.status(status).json({ error: message })
+    if (handleUploadError(err, res)) return
+
+    const files = req.files as Express.Multer.File[]
+    const eventIdParam = req.params.eventId
+    const eventId = Array.isArray(eventIdParam) ? eventIdParam[0] : eventIdParam
+
+    ;(async () => {
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: 'No files provided' })
+      }
+
+      if (!eventId) {
+        return res.status(400).json({ error: 'Event ID required' })
       }
 
       try {
-        const { eventId } = req.params
-        const files = req.files as Express.Multer.File[]
+        const results: BatchUploadResult<EventPhotoMetadata>[] = []
 
-        if (!files || files.length === 0) {
-          return res.status(400).json({ error: 'No files provided' })
-        }
-
-        if (!eventId) {
-          return res.status(400).json({ error: 'Event ID required' })
-        }
-
-        const results = []
-
-        for (const file of files) {
+        await runWithConcurrency(files, getConcurrencyLimit(), async (file) => {
           try {
-            // Validate image
-            const validation = await validateImage(file.buffer, file.mimetype)
-            if (!validation.valid) {
-              results.push({
-                filename: file.originalname,
-                success: false,
-                error: validation.error,
-              })
-              continue
-            }
-
-            // Generate unique filename
-            const filename = generateUniqueFilename(file.originalname)
-
-            // Save original to VPS
-            const { url: originalUrl } = await saveOriginal(
-              file.buffer,
-              'events',
-              eventId as string,
-              filename,
-              file.mimetype
-            )
-
-            // Process and generate thumbnails
-            const processResult = await processImage(
-              file.buffer,
-              filename,
-              'events',
-              eventId as string
-            )
-
-            const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
-            const photoId = uuidv4()
+            const { photoId, originalUrl, thumbnailUrls, processResult } =
+              await processSingleUpload(file, 'events', eventId)
 
             await insertEventPhoto({
               id: photoId,
-              eventId: eventId as string,
+              eventId: eventId,
               filename: file.originalname,
               originalUrl: originalUrl,
               thumbnailUrl: thumbnailUrls.medium,
@@ -390,21 +362,21 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
               mimeType: file.mimetype,
             })
 
+            const photo: EventPhotoMetadata = {
+              ...buildPhotoMetadata(
+                photoId,
+                file,
+                originalUrl,
+                thumbnailUrls,
+                processResult
+              ),
+              event_id: eventId,
+            }
+
             results.push({
               filename: file.originalname,
               success: true,
-              photo: {
-                id: photoId,
-                event_id: eventId,
-                original_url: originalUrl,
-                thumbnail_url: thumbnailUrls.medium,
-                thumbnail_small_url: thumbnailUrls.small,
-                thumbnail_medium_url: thumbnailUrls.medium,
-                thumbnail_large_url: thumbnailUrls.large,
-                width: processResult.original.width,
-                height: processResult.original.height,
-                size: file.size,
-              },
+              photo,
             })
           } catch (error) {
             results.push({
@@ -412,8 +384,10 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
               success: false,
               error: error instanceof Error ? error.message : 'Failed',
             })
+          } finally {
+            await deleteFile(file.path)
           }
-        }
+        })
 
         const successCount = results.filter((r) => r.success).length
         const failCount = results.filter((r) => !r.success).length
@@ -430,9 +404,7 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
         })
       } catch (error) {
         console.error('Batch event upload error:', error)
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Upload failed',
-        })
+        next(error)
       }
     })()
   })
@@ -442,51 +414,23 @@ router.post('/event/:eventId/batch', (req: Request, res: Response) => {
  * POST /upload/slideshow
  * Upload photo for hero slideshow
  */
-router.post('/slideshow', (req: Request, res: Response) => {
+router.post('/slideshow', (req: Request, res: Response, next: NextFunction) => {
   uploadSingle(req, res, (err: unknown) => {
-    void (async () => {
-      if (err) {
-        const { status, message } = handleMulterError(err)
-        return res.status(status).json({ error: message })
+    if (handleUploadError(err, res)) return
+
+    const file = req.file
+
+    ;(async () => {
+      if (!file) {
+        return res.status(400).json({ error: 'No file provided' })
       }
 
       try {
-        const file = req.file
-        if (!file) {
-          return res.status(400).json({ error: 'No file provided' })
-        }
-
-        // Validate image
-        const validation = await validateImage(file.buffer, file.mimetype)
-        if (!validation.valid) {
-          return res.status(400).json({ error: validation.error })
-        }
-
-        // Generate unique filename
-        const filename = generateUniqueFilename(file.originalname)
-
-        // Save original to VPS
-        const { url: originalUrl } = await saveOriginal(
-          file.buffer,
-          'slideshow',
-          null,
-          filename,
-          file.mimetype
-        )
-
-        // Process and generate thumbnails
-        const processResult = await processImage(
-          file.buffer,
-          filename,
-          'slideshow',
-          null
-        )
-
-        const thumbnailUrls = getThumbnailUrls(processResult.thumbnails)
-        const slideId = uuidv4()
+        const { photoId, originalUrl, thumbnailUrls, processResult } =
+          await processSingleUpload(file, 'slideshow')
 
         await insertHeroSlide({
-          id: slideId,
+          id: photoId,
           imageUrl: originalUrl,
           thumbnailUrl: thumbnailUrls.large,
         })
@@ -494,20 +438,21 @@ router.post('/slideshow', (req: Request, res: Response) => {
         res.json({
           success: true,
           photo: {
-            id: slideId,
+            id: photoId,
             filename: file.originalname,
             original_url: originalUrl,
-            thumbnail_url: thumbnailUrls.large, // Slideshow uses large
+            thumbnail_url: thumbnailUrls.large,
             width: processResult.original.width,
             height: processResult.original.height,
             size: file.size,
+            mime_type: file.mimetype,
           },
         })
       } catch (error) {
         console.error('Slideshow upload error:', error)
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Upload failed',
-        })
+        next(error)
+      } finally {
+        await deleteFile(file.path)
       }
     })()
   })

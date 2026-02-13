@@ -1,5 +1,7 @@
 import multer from 'multer'
 import { Request } from 'express'
+import os from 'os'
+import path from 'path'
 import { config } from '../config/index.js'
 
 /**
@@ -21,7 +23,17 @@ const fileFilter = (
  * Multer configuration - memory storage (buffer)
  */
 export const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(null, os.tmpdir())
+    },
+    filename: (_req, file, cb) => {
+      const timestamp = Date.now()
+      const random = Math.random().toString(36).slice(2, 8)
+      const ext = path.extname(file.originalname)
+      cb(null, `upload-${timestamp}-${random}${ext}`)
+    },
+  }),
   limits: {
     fileSize: config.upload.maxFileSize,
     files: config.upload.maxFiles,
